@@ -39,7 +39,7 @@ def count_outliers_iqr(series):
 # ### Merged_oxygen table - the code of the sensor(it is either 01/07, but it is the same sensor), amount of oxygen, start time, end time(data from 2021)
 # 
 
-# In[13]:
+# In[3]:
 
 
 ammonium = pd.read_parquet('data/Chemical measurements influent 2023_2024/ammonium_2024.parquet')
@@ -48,7 +48,7 @@ ammonium = ammonium.rename(columns={"hstWaarde": "hstWaarde_ammonium_2023", "his
 ammonium['hstWaarde_ammonium_2023'] = ammonium['hstWaarde_ammonium_2023'].apply(pd.to_numeric, errors='coerce')
 
 
-# In[14]:
+# In[4]:
 
 
 outliers_count = count_outliers_iqr(ammonium['hstWaarde_ammonium_2023'])
@@ -56,7 +56,7 @@ print(f"Number of outliers:  {outliers_count}")
 plt.boxplot(ammonium['hstWaarde_ammonium_2023'])
 
 
-# In[15]:
+# In[5]:
 
 
 nitrate = pd.read_parquet('data/Chemical measurements influent 2023_2024/nitrate_2024.parquet')
@@ -65,7 +65,7 @@ nitrate = nitrate.rename(columns={"hstWaarde": "hstWaarde_nitrate", "historianTa
 nitrate['hstWaarde_nitrate'] = nitrate['hstWaarde_nitrate'].apply(pd.to_numeric, errors='coerce')
 
 
-# In[16]:
+# In[6]:
 
 
 outliers_count = count_outliers_iqr(nitrate['hstWaarde_nitrate'])
@@ -73,7 +73,7 @@ print(f"Number of outliers:  {outliers_count}")
 plt.boxplot(nitrate['hstWaarde_nitrate'])
 
 
-# In[17]:
+# In[7]:
 
 
 phosphate = pd.read_parquet('data/Chemical measurements influent 2023_2024/phosphate_2024.parquet')
@@ -82,7 +82,7 @@ phosphate = phosphate.rename(columns={"hstWaarde": "hstWaarde_phosphate", "histo
 phosphate['hstWaarde_phosphate'] = phosphate['hstWaarde_phosphate'].apply(pd.to_numeric, errors='coerce')
 
 
-# In[18]:
+# In[8]:
 
 
 outliers_count = count_outliers_iqr(phosphate['hstWaarde_phosphate'])
@@ -90,7 +90,7 @@ print(f"Number of outliers:  {outliers_count}")
 plt.boxplot(phosphate['hstWaarde_phosphate'])
 
 
-# In[20]:
+# In[9]:
 
 
 merged = pd.merge(ammonium, nitrate, on="datumBeginMeting")
@@ -125,7 +125,7 @@ hourly_scaled_means = chemicals_hourly_scaled.groupby('Hour').mean().reset_index
 hourly_scaled_means
 
 
-# In[21]:
+# In[10]:
 
 
 oxygen_a = pd.read_parquet('data/OxygenData2024/oxygen_a_2024.parquet')
@@ -141,7 +141,7 @@ oxygen_b = oxygen_b.rename(columns={"hstWaarde": "hstWaarde_oxygen_b", "historia
 oxygen_b['hstWaarde_oxygen_b'] = oxygen_b['hstWaarde_oxygen_b'].apply(pd.to_numeric, errors='coerce')
 
 
-# In[22]:
+# In[11]:
 
 
 combines_oxygen = pd.concat([oxygen_a, oxygen_b], axis=1)
@@ -149,22 +149,55 @@ combines_oxygen['Average_value'] = (combines_oxygen['hstWaarde_oxygen_a'] + comb
 combines_oxygen
 
 
-# In[23]:
+# In[12]:
 
 
 weather = pd.read_csv('weather.csv')
+weather = weather.rename(columns={'Timestamp': 'Hour'})
+weather['Hour'] = pd.to_datetime(weather['Hour'])
 weather
 
 
+# In[13]:
+
+
+combined = pd.merge(chemicals_hourly_scaled, weather, on='Hour', how='inner')
+combined
+
+
 # In[24]:
+
+
+numeric_data = combined.select_dtypes(include='number')
+spearman_corr = numeric_data.corr(method='spearman')
+
+# Plot the heatmap
+plt.figure(figsize=(18, 14))
+sns.heatmap(
+    spearman_corr,
+    annot=True,
+    fmt=".2f",
+    cmap="coolwarm",
+    square=True,
+    linewidths=0.5,
+    cbar_kws={"label": "Spearman Correlation"}
+)
+plt.title("Spearman Correlation Heatmap")
+plt.xticks(rotation=45, ha='right')
+plt.tight_layout()
+plt.show()
+
+
+# In[14]:
 
 
 from sklearn.feature_selection import mutual_info_regression
 
 # Example: measure mutual information with respect to a target
 target = 'nitrate'
-X = numeric_cols.drop(columns=[target])
-y = numeric_cols[target]
+X = combined.drop(columns=[target])
+X = X.select_dtypes(include=['int64', 'float64']) 
+y = combined[target]
 
 mi = mutual_info_regression(X, y, discrete_features=False)
 mi_scores = pd.Series(mi, index=X.columns).sort_values(ascending=False)
@@ -177,91 +210,58 @@ plt.tight_layout()
 plt.show()
 
 
-# In[25]:
-
-
-spearman_corr = numeric_cols.corr(method='spearman')
-
-plt.figure(figsize=(12, 10))
-sns.heatmap(
-    spearman_corr,
-    annot=True,
-    fmt=".2f",
-    cmap="crest",
-    annot_kws={"size": 8},
-    linewidths=0.5,
-    square=True,
-    cbar_kws={"shrink": 0.8, "label": "Spearman Correlation Coefficient"}
-)
-
-plt.title("Spearman Correlation Heatmap (Monotonic Relationships)", fontsize=14)
-plt.xticks(rotation=45, ha='right', fontsize=10)
-plt.yticks(rotation=0, fontsize=10)
-plt.tight_layout()
-plt.show()
-
-
-# In[26]:
+# In[16]:
 
 
 target = 'nitrate'
-X = combined.drop(columns=[target])
-y = combined['DewPointTemp']
+features = ['DewPointTemp', 'AirPressure', 'Temperature']
+X = combined[features]
+y = combined[target]
 
 
-# In[101]:
+# In[17]:
 
 
 numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
 categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
 
 
-# In[102]:
+# In[18]:
 
 
 num_imputer = SimpleImputer(strategy='median')
 X_num = num_imputer.fit_transform(X[numerical_features])
 
 
-# In[103]:
+# In[19]:
 
 
 scaler = RobustScaler()
 X_num_scaled = scaler.fit_transform(X_num)
 
 
-# In[104]:
+# In[20]:
 
 
 encoder = OneHotEncoder(handle_unknown='ignore')
 X_cat_encoded = encoder.fit_transform(X[categorical_features])
 
 
-# In[105]:
+# In[26]:
 
 
-preprocessor = ColumnTransformer(transformers=[
-    ('num', numerical_transformer, numerical_features),
-    ('cat', categorical_transformer, categorical_features)
-])
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
 
-# In[106]:
-
-
-kf = KFold(n_splits=3, shuffle=True, random_state=42)
-
-
-# In[107]:
+# In[32]:
 
 
 model = Pipeline(steps=[
-    ('preprocessor', preprocessor),
     ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
 ])
 
 
-# In[108]:
+# In[33]:
 
 
 cv_scores = cross_val_score(
@@ -273,20 +273,20 @@ cv_scores = cross_val_score(
 )
 
 
-# In[109]:
+# In[34]:
 
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 
-# In[110]:
+# In[35]:
 
 
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
 
-# In[111]:
+# In[36]:
 
 
 print("Fold-by-fold R²:", cv_scores)

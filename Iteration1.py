@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[35]:
 
 
 import pandas as pd
@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sklearn.preprocessing import RobustScaler
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_predict
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
@@ -18,6 +18,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import GridSearchCV
 
 
 # In[2]:
@@ -90,7 +91,7 @@ print(f"Number of outliers:  {outliers_count}")
 plt.boxplot(phosphate['hstWaarde_phosphate'])
 
 
-# In[9]:
+# In[13]:
 
 
 merged = pd.merge(ammonium, nitrate, on="datumBeginMeting")
@@ -102,54 +103,12 @@ chemicals_hourly = pd.DataFrame({
     'phosphate': chemicals['hstWaarde_phosphate']
 })
 
-chemicals_hourly = chemicals_hourly.dropna(subset=['ammonium', 'nitrate', 'phosphate'], how='all')
+hourly_means = chemicals_hourly.groupby('Hour')[['ammonium', 'nitrate', 'phosphate']].mean().reset_index()
 
-imputer = SimpleImputer(strategy='median')
-chemicals_imputed = pd.DataFrame(
-    imputer.fit_transform(chemicals_hourly[['ammonium', 'nitrate', 'phosphate']]),
-    columns=['ammonium', 'nitrate', 'phosphate']
-)
-
-log_transformed = np.log1p(chemicals_imputed)
-
-scaler = RobustScaler()
-scaled = pd.DataFrame(
-    scaler.fit_transform(log_transformed),
-    columns=['ammonium', 'nitrate', 'phosphate']
-)
-
-chemicals_hourly_scaled = pd.concat([chemicals_hourly[['Hour']].reset_index(drop=True), scaled], axis=1)
-
-hourly_scaled_means = chemicals_hourly_scaled.groupby('Hour').mean().reset_index()
-
-hourly_scaled_means
+hourly_means
 
 
-# In[10]:
-
-
-oxygen_a = pd.read_parquet('data/OxygenData2024/oxygen_a_2024.parquet')
-oxygen_a = oxygen_a.drop(columns=['waardebewerkingsmethodeCode'])
-legacy_oxygen_a = pd.read_parquet('data/HistoricalWWTPData/DTWINTERNALWWTPDATA/Oxygen Data/zuurstofA_EDE_B121069901_K600.MTW.parquet')
-oxygen_a = oxygen_a.rename(columns={"hstWaarde": "hstWaarde_oxygen_a", "historianTagnummer": "historianTagnummer_oxygen_a"}).reset_index(drop=True)
-oxygen_a['hstWaarde_oxygen_a'] = oxygen_a['hstWaarde_oxygen_a'].apply(pd.to_numeric, errors='coerce')
-
-oxygen_b = pd.read_parquet('data/OxygenData2024/oxygen_b_2024.parquet')
-oxygen_b = oxygen_b.drop(columns=['waardebewerkingsmethodeCode'])
-legacy_oxygen_b = pd.read_parquet('data/HistoricalWWTPData/DTWINTERNALWWTPDATA/Oxygen Data/zuurstofB_EDE_B121069907_K600.MTW.parquet')
-oxygen_b = oxygen_b.rename(columns={"hstWaarde": "hstWaarde_oxygen_b", "historianTagnummer": "historianTagnummer_oxygen_b"}).reset_index(drop=True)
-oxygen_b['hstWaarde_oxygen_b'] = oxygen_b['hstWaarde_oxygen_b'].apply(pd.to_numeric, errors='coerce')
-
-
-# In[11]:
-
-
-combines_oxygen = pd.concat([oxygen_a, oxygen_b], axis=1)
-combines_oxygen['Average_value'] = (combines_oxygen['hstWaarde_oxygen_a'] + combines_oxygen['hstWaarde_oxygen_b']) / 2
-combines_oxygen
-
-
-# In[12]:
+# In[14]:
 
 
 weather = pd.read_csv('weather.csv')
@@ -158,14 +117,14 @@ weather['Hour'] = pd.to_datetime(weather['Hour'])
 weather
 
 
-# In[13]:
+# In[16]:
 
 
-combined = pd.merge(chemicals_hourly_scaled, weather, on='Hour', how='inner')
+combined = pd.merge(hourly_means, weather, on='Hour', how='inner')
 combined
 
 
-# In[24]:
+# In[17]:
 
 
 numeric_data = combined.select_dtypes(include='number')
@@ -188,7 +147,7 @@ plt.tight_layout()
 plt.show()
 
 
-# In[14]:
+# In[18]:
 
 
 from sklearn.feature_selection import mutual_info_regression
@@ -210,7 +169,7 @@ plt.tight_layout()
 plt.show()
 
 
-# In[16]:
+# In[23]:
 
 
 target = 'nitrate'
@@ -219,80 +178,69 @@ X = combined[features]
 y = combined[target]
 
 
-# In[17]:
+# In[69]:
 
 
-numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
-categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-
-
-# In[18]:
-
-
-num_imputer = SimpleImputer(strategy='median')
-X_num = num_imputer.fit_transform(X[numerical_features])
-
-
-# In[19]:
-
-
-scaler = RobustScaler()
-X_num_scaled = scaler.fit_transform(X_num)
-
-
-# In[20]:
-
-
-encoder = OneHotEncoder(handle_unknown='ignore')
-X_cat_encoded = encoder.fit_transform(X[categorical_features])
-
-
-# In[26]:
-
-
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
-
-
-# In[32]:
-
-
-model = Pipeline(steps=[
-    ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
-])
-
-
-# In[33]:
-
-
-cv_scores = cross_val_score(
-    model,
-    X,   # already-numeric feature matrix
-    y,
-    cv=kf,
-    scoring='r2'
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42
 )
 
 
-# In[34]:
+# In[72]:
 
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = Pipeline([
+    ("imputing", SimpleImputer(strategy="median")),
+    ("scaling", RobustScaler()),
+    ("modeling", RandomForestRegressor(
+        random_state=42,
+        n_estimators=100,
+        max_depth=None,
+        min_samples_leaf=1 
+    ))
+])
 
 
-# In[35]:
+# In[75]:
 
 
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
+cv_score = cross_val_score(estimator=model, X=X_train, y=y_train)
 
 
-# In[36]:
+# In[76]:
 
 
-print("Fold-by-fold R²:", cv_scores)
-print("Average R²      :", np.mean(cv_scores))
-mse = mean_squared_error(y_test, y_pred)
-print("Mean Squared Error MSE: ", mse)
+print(cv_score)
+
+
+# In[66]:
+
+
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+y_train_pred = cross_val_predict(full_pipeline, X_train, y_train, cv=kf)
+
+
+# In[67]:
+
+
+full_pipeline.fit(X_train, y_train)
+y_test_pred = full_pipeline.predict(X_test)
+
+
+# In[68]:
+
+
+print("Train CV MSE :", mean_squared_error(y_train, y_train_pred))
+print("Train CV RMSE:", np.sqrt(mean_squared_error(y_train, y_train_pred)))
+
+print("Test MSE     :", mean_squared_error(y_test, y_test_pred))
+print("Test RMSE    :", np.sqrt(mean_squared_error(y_test, y_test_pred)))
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
